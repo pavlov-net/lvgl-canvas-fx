@@ -290,21 +290,27 @@ void FxAudioSpectrum::step(float /*dt*/) {
   if (!ready || (int) bar_local.size() != num_bars_)
     return;
 
+  // Ensure geometry is up to date with current width
+  ensure_bar_geom_();
+
+  // Use LVGL 9 layer-based canvas drawing: batch all rects in one layer
+  lv_layer_t layer;
+  lv_canvas_init_layer(canvas_, &layer);
+
   // Clear the effect sub-rect
   lv_draw_rect_dsc_t bg;
   lv_draw_rect_dsc_init(&bg);
   bg.bg_color = lv_color_black();
   bg.bg_opa = LV_OPA_COVER;
   bg.border_opa = LV_OPA_TRANSP;
-  lv_canvas_draw_rect(canvas_, area_.x, area_.y, area_.w, area_.h, &bg);
+  lv_area_t bg_area;
+  lv_area_set(&bg_area, area_.x, area_.y, area_.x + area_.w - 1, area_.y + area_.h - 1);
+  lv_draw_rect(&layer, &bg, &bg_area);
 
   // Draw bars + peaks
   const int H = area_.h;
   const int gap = gap_px_;
   int x = area_.x;
-
-  // Ensure geometry is up to date with current width
-  ensure_bar_geom_();
 
   for (int i = 0; i < num_bars_; i++) {
     int h = (int) lrintf(bar_local[i] * H);
@@ -314,17 +320,23 @@ void FxAudioSpectrum::step(float /*dt*/) {
 
     // bar
     dsc_bar_.bg_color = bar_color_;
-    lv_canvas_draw_rect(canvas_, x, y0, bar_w_px_, h, &dsc_bar_);
+    lv_area_t bar_area;
+    lv_area_set(&bar_area, x, y0, x + bar_w_px_ - 1, y0 + h - 1);
+    lv_draw_rect(&layer, &dsc_bar_, &bar_area);
 
     // peak (1px high)
     int y_peak = area_.y + H - (int) lrintf(peak_local[i] * H) - 1;
     if (y_peak < area_.y)
       y_peak = area_.y;
     dsc_peak_.bg_color = peak_color_;
-    lv_canvas_draw_rect(canvas_, x, y_peak, bar_w_px_, 1, &dsc_peak_);
+    lv_area_t peak_area;
+    lv_area_set(&peak_area, x, y_peak, x + bar_w_px_ - 1, y_peak);
+    lv_draw_rect(&layer, &dsc_peak_, &peak_area);
 
     x += bar_w_px_ + gap;
   }
+
+  lv_canvas_finish_layer(canvas_, &layer);
 }
 
 }  // namespace lvgl_canvas_fx

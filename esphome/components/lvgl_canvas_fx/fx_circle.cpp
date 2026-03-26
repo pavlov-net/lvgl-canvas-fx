@@ -61,21 +61,26 @@ void FxCircle::fast_clear_rect_(int x, int y, int w, int h) {
     return;
 
   // Access backing buffer; black is all-zero for >=16-bit true-color formats.
-  const lv_img_dsc_t *img = (const lv_img_dsc_t *) lv_canvas_get_img(canvas_);
-  if (!img || !img->data) {
-    // Fallback (rare): draw a black rect via LVGL pipeline.
+  lv_draw_buf_t *draw_buf = lv_canvas_get_draw_buf(canvas_);
+  if (!draw_buf || !draw_buf->data) {
+    // Fallback (rare): draw a black rect via LVGL layer pipeline.
     lv_draw_rect_dsc_t bg;
     lv_draw_rect_dsc_init(&bg);
     bg.bg_color = lv_color_black();
     bg.bg_opa = LV_OPA_COVER;
     bg.border_opa = LV_OPA_TRANSP;
-    lv_canvas_draw_rect(canvas_, x0, y0, x1 - x0, y1 - y0, &bg);
+    lv_layer_t layer;
+    lv_canvas_init_layer(canvas_, &layer);
+    lv_area_t area;
+    lv_area_set(&area, x0, y0, x1 - 1, y1 - 1);
+    lv_draw_rect(&layer, &bg, &area);
+    lv_canvas_finish_layer(canvas_, &layer);
     return;
   }
 
   constexpr int BPP = LV_COLOR_DEPTH / 8;  // 2 for 565, 3 for 888, 4 for 8888
-  uint8_t *buf = const_cast<uint8_t *>(static_cast<const uint8_t *>(img->data));
-  const int stride_bytes = cw * BPP;
+  uint8_t *buf = draw_buf->data;
+  const int stride_bytes = (int) draw_buf->header.stride;
   const int row_bytes = (x1 - x0) * BPP;
 
   for (int yy = y0; yy < y1; ++yy) {
@@ -84,7 +89,7 @@ void FxCircle::fast_clear_rect_(int x, int y, int w, int h) {
 
   // Invalidate the union once (avoid per-row invalidates)
   lv_area_t a;
-  lv_area_set(&a, (lv_coord_t) x0, (lv_coord_t) y0, (lv_coord_t) (x1 - 1), (lv_coord_t) (y1 - 1));
+  lv_area_set(&a, (int32_t) x0, (int32_t) y0, (int32_t) (x1 - 1), (int32_t) (y1 - 1));
   lv_obj_invalidate_area(canvas_, &a);
 }
 #endif
@@ -110,15 +115,33 @@ void FxCircle::step(float dt) {
 
   if (prev_r_ < 0 || r >= prev_r_) {
     // First frame or growing → just overdraw (no clear)
-    lv_canvas_draw_rect(canvas_, new_x, new_y, side, side, &dsc_fg_);
+    lv_layer_t layer;
+    lv_canvas_init_layer(canvas_, &layer);
+    lv_area_t fg_area;
+    lv_area_set(&fg_area, new_x, new_y, new_x + side - 1, new_y + side - 1);
+    lv_draw_rect(&layer, &dsc_fg_, &fg_area);
+    lv_canvas_finish_layer(canvas_, &layer);
   } else {
     // Shrinking → clear old bounds then draw
 #if FX_CIRCLE_FAST_CLEAR
     fast_clear_rect_(prev_cx_ - prev_r_, prev_cy_ - prev_r_, prev_r_ * 2, prev_r_ * 2);
 #else
-    lv_canvas_draw_rect(canvas_, prev_cx_ - prev_r_, prev_cy_ - prev_r_, prev_r_ * 2, prev_r_ * 2, &dsc_bg_);
+    {
+      lv_layer_t layer;
+      lv_canvas_init_layer(canvas_, &layer);
+      lv_area_t bg_area;
+      lv_area_set(&bg_area, prev_cx_ - prev_r_, prev_cy_ - prev_r_,
+                   prev_cx_ + prev_r_ - 1, prev_cy_ + prev_r_ - 1);
+      lv_draw_rect(&layer, &dsc_bg_, &bg_area);
+      lv_canvas_finish_layer(canvas_, &layer);
+    }
 #endif
-    lv_canvas_draw_rect(canvas_, new_x, new_y, side, side, &dsc_fg_);
+    lv_layer_t layer;
+    lv_canvas_init_layer(canvas_, &layer);
+    lv_area_t fg_area;
+    lv_area_set(&fg_area, new_x, new_y, new_x + side - 1, new_y + side - 1);
+    lv_draw_rect(&layer, &dsc_fg_, &fg_area);
+    lv_canvas_finish_layer(canvas_, &layer);
   }
 
   prev_cx_ = cx;

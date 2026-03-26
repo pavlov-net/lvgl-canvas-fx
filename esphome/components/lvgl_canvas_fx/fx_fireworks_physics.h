@@ -74,11 +74,11 @@ class FxFireworksPhysics : public FxBase {
 
   // Canvas view cache (fast path)
   enum class BufFmt : uint8_t { FMT_NONE, FMT_565, FMT_32 };
-  const lv_img_dsc_t *img_{nullptr};
+  lv_draw_buf_t *draw_buf_{nullptr};
   uint8_t *buf_{nullptr};
   int stride_bytes_{0};
   BufFmt fmt_{BufFmt::FMT_NONE};
-  inline bool canvas_ready_() const { return canvas_ && img_ && buf_ && stride_bytes_ > 0 && fmt_ != BufFmt::FMT_NONE; }
+  inline bool canvas_ready_() const { return canvas_ && draw_buf_ && buf_ && stride_bytes_ > 0 && fmt_ != BufFmt::FMT_NONE; }
 
   // Size-aware parameters (recomputed on resize)
   float grav_px_s2_{180.0f};  // px/s^2

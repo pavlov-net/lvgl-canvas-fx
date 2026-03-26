@@ -1,6 +1,6 @@
 # lvgl-canvas-fx
 
-An ESPHome external component that renders fun, high‑performance visual effects on an **LVGL Canvas**. It’s designed for ESP32‑class devices (ESPHome 2025.x, LVGL v8) and works with any LVGL‑backed display (HUB75 matrices, TFTs, etc.).
+An ESPHome external component that renders fun, high‑performance visual effects on an **LVGL Canvas**. It’s designed for ESP32‑class devices (ESPHome 2025.x, LVGL 9.5) and works with any LVGL‑backed display (HUB75 matrices, TFTs, etc.).
 
 > **Status:** early but functional. Effects today: `circle`, `fireworks`, `fireplace`, `aurora`, `audio_spectrum`. Contributions welcome!
 
@@ -14,8 +14,8 @@ An ESPHome external component that renders fun, high‑performance visual effect
 - **Physics‑based fireworks** powered by Chipmunk2D.
 
 ## Requirements
-- **ESPHome:** 2025.8.x or newer
-- **LVGL:** v8 (ESPHome's built‑in LVGL integration)
+- **ESPHome:** 2025.8.x or newer (with LVGL 9.5 support)
+- **LVGL:** 9.5 (ESPHome's built‑in LVGL integration)
 
 ## Quick start (full example)
 The example below wires up a Canvas, the effect engine, and a template `select` so you can switch effects at runtime. It also pauses the effect when the page is not visible.

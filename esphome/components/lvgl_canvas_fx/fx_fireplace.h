@@ -35,9 +35,18 @@ class FxFireplace : public FxBase {
   void draw_frame_();     // write to canvas buffer
 
   int W_{0}, H_{0};
+  int stride_{0};  // canvas row stride in bytes (from draw buffer)
   using HeatVec = std::vector<uint8_t, esphome::RAMAllocator<uint8_t>>;
-  HeatVec heat_;              // size = W_*H_, values 0..36
-  lv_color_t palette_[37]{};  // precomputed
+  HeatVec heat_;  // size = W_*H_, values 0..36
+
+  // Pre-computed palette in the canvas buffer's native pixel format
+#if LV_COLOR_DEPTH == 16
+  uint16_t palette_[37]{};
+#elif LV_COLOR_DEPTH == 32
+  uint32_t palette_[37]{};
+#else
+  uint8_t palette_[37][3]{};  // RGB888 bytes
+#endif
 };
 
 }  // namespace lvgl_canvas_fx

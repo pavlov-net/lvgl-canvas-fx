@@ -52,6 +52,7 @@ class FxAurora : public FxBase {
 
   // ---- Format info (cached at bind) ----
   int bpp_{0};
+  int stride_{0};  // canvas row stride in bytes
   bool has_alpha_{false};
 
   // ---- LUTs (built at bind) ----

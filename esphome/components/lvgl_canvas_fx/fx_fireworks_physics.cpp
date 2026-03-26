@@ -116,25 +116,23 @@ void FxFireworksPhysics::recompute_params_() {
 
 // -------------------- fast canvas view --------------------
 void FxFireworksPhysics::refresh_canvas_view_() {
-  img_ = (const lv_img_dsc_t *) lv_canvas_get_img(canvas_);
+  draw_buf_ = lv_canvas_get_draw_buf(canvas_);
   buf_ = nullptr;
   stride_bytes_ = 0;
   fmt_ = BufFmt::FMT_NONE;
-  if (!img_ || !img_->data || W_ <= 0 || H_ <= 0)
+  if (!draw_buf_ || !draw_buf_->data || W_ <= 0 || H_ <= 0)
     return;
 
-  if (img_->header.cf == LV_IMG_CF_TRUE_COLOR) {
-#if LV_COLOR_DEPTH == 16
+  lv_color_format_t cf = (lv_color_format_t) draw_buf_->header.cf;
+  if (cf == LV_COLOR_FORMAT_RGB565) {
     fmt_ = BufFmt::FMT_565;
-    buf_ = (uint8_t *) img_->data;
-    stride_bytes_ = W_ * (int) sizeof(lv_color_t);
-#elif LV_COLOR_DEPTH == 32
+  } else if (cf == LV_COLOR_FORMAT_XRGB8888 || cf == LV_COLOR_FORMAT_ARGB8888) {
     fmt_ = BufFmt::FMT_32;
-    buf_ = (uint8_t *) img_->data;
-    stride_bytes_ = W_ * (int) sizeof(lv_color_t);
-#else
-    fmt_ = BufFmt::FMT_NONE;
-#endif
+  }
+
+  if (fmt_ != BufFmt::FMT_NONE) {
+    buf_ = draw_buf_->data;
+    stride_bytes_ = (int) draw_buf_->header.stride;
   }
 }
 
@@ -143,15 +141,25 @@ inline void FxFireworksPhysics::put_px_(int x, int y, lv_color_t c) {
     return;
   if ((unsigned) x >= (unsigned) W_ || (unsigned) y >= (unsigned) H_)
     return;
-  auto *row = reinterpret_cast<lv_color_t *>(buf_ + y * stride_bytes_);
-  row[x] = c;  // honors LV_COLOR_*_SWAP implicitly
+  uint8_t *row = buf_ + y * stride_bytes_;
+  if (fmt_ == BufFmt::FMT_565) {
+    reinterpret_cast<uint16_t *>(row)[x] =
+        ((uint16_t) (c.red >> 3) << 11) | ((uint16_t) (c.green >> 2) << 5) | (c.blue >> 3);
+  } else {
+    // FMT_32: XRGB8888
+    reinterpret_cast<uint32_t *>(row)[x] =
+        (0xFFu << 24) | ((uint32_t) c.red << 16) | ((uint32_t) c.green << 8) | c.blue;
+  }
 }
 
 void FxFireworksPhysics::clear_black_fast_() {
   if (!canvas_ready_())
     return;
-  // For TRUE_COLOR (565/32bpp), black is all zeros in lv_color_t memory
-  memset(buf_, 0x00, (size_t) stride_bytes_ * H_);
+  // For RGB565 / XRGB8888, black is all zeros in memory
+  for (int y = 0; y < H_; ++y) {
+    int bpp = (fmt_ == BufFmt::FMT_565) ? 2 : 4;
+    memset(buf_ + y * stride_bytes_, 0x00, (size_t) W_ * bpp);
+  }
 }
 
 void FxFireworksPhysics::fade_to_black_fast_(uint8_t opa) {
@@ -166,29 +174,37 @@ void FxFireworksPhysics::fade_to_black_fast_(uint8_t opa) {
 
   const uint8_t a = (uint8_t) (255u - (uint32_t) opa);
 
-#if LV_COLOR_DEPTH == 16 && LV_COLOR_16_SWAP == 0
-  // Fast path only when 565 is not byte-swapped.
-  uint16_t *p = reinterpret_cast<uint16_t *>(buf_);
-  const size_t n = (size_t) W_ * H_;
-  for (size_t i = 0; i < n; i++) {
-    uint16_t c = p[i];
-    uint32_t r = (c >> 11) & 0x1F;
-    uint32_t g = (c >> 5) & 0x3F;
-    uint32_t b = c & 0x1F;
-    // No rounding bias to allow very small values to fade to zero
-    r = (r * a) >> 8;
-    g = (g * a) >> 8;
-    b = (b * a) >> 8;
-    p[i] = (uint16_t) ((r << 11) | (g << 5) | b);
+  if (fmt_ == BufFmt::FMT_565) {
+    // Fast path for RGB565 (stride-aware)
+    for (int y = 0; y < H_; ++y) {
+      uint16_t *p = reinterpret_cast<uint16_t *>(buf_ + y * stride_bytes_);
+      for (int x = 0; x < W_; ++x) {
+        uint16_t c = p[x];
+        uint32_t r = (c >> 11) & 0x1F;
+        uint32_t g = (c >> 5) & 0x3F;
+        uint32_t b = c & 0x1F;
+        r = (r * a) >> 8;
+        g = (g * a) >> 8;
+        b = (b * a) >> 8;
+        p[x] = (uint16_t) ((r << 11) | (g << 5) | b);
+      }
+    }
+  } else {
+    // Fast path for XRGB8888 / ARGB8888 (stride-aware)
+    for (int y = 0; y < H_; ++y) {
+      uint32_t *p = reinterpret_cast<uint32_t *>(buf_ + y * stride_bytes_);
+      for (int x = 0; x < W_; ++x) {
+        uint32_t c = p[x];
+        uint32_t r = (c >> 16) & 0xFF;
+        uint32_t g = (c >> 8) & 0xFF;
+        uint32_t b = c & 0xFF;
+        r = (r * a) >> 8;
+        g = (g * a) >> 8;
+        b = (b * a) >> 8;
+        p[x] = (0xFFu << 24) | (r << 16) | (g << 8) | b;
+      }
+    }
   }
-#else
-  // Swap-safe generic path (works for 565+swap and 32-bit).
-  auto *row = reinterpret_cast<lv_color_t *>(buf_);
-  const size_t n = (size_t) W_ * H_;
-  const lv_color_t black = lv_color_black();
-  for (size_t i = 0; i < n; i++)
-    row[i] = lv_color_mix(row[i], black, a);
-#endif
 }
 
 // -------------------- spawning / bursting --------------------
@@ -445,7 +461,7 @@ void FxFireworksPhysics::draw_px_rect_(int x, int y, uint8_t px, lv_color_t colo
     return;
   }
 
-  // Fallback: original LVGL draw (should rarely hit)
+  // Fallback: LVGL layer draw (should rarely hit)
   if (!canvas_)
     return;
   const int W = lv_obj_get_width(canvas_), H = lv_obj_get_height(canvas_);
@@ -462,7 +478,12 @@ void FxFireworksPhysics::draw_px_rect_(int x, int y, uint8_t px, lv_color_t colo
   d.bg_color = color;
   d.bg_opa = LV_OPA_COVER;
   d.border_opa = LV_OPA_TRANSP;
-  lv_canvas_draw_rect(canvas_, sx, sy, ex - sx, ey - sy, &d);
+  lv_layer_t layer;
+  lv_canvas_init_layer(canvas_, &layer);
+  lv_area_t area;
+  lv_area_set(&area, sx, sy, ex - 1, ey - 1);
+  lv_draw_rect(&layer, &d, &area);
+  lv_canvas_finish_layer(canvas_, &layer);
 }
 
 // -------------------- frame --------------------

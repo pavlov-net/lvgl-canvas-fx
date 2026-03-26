@@ -49,27 +49,15 @@ void FxAurora::build_palette_() {
     }
 
 #if LV_COLOR_DEPTH == 16
-    // Use LVGL's channel macros to derive RGB,
-    // then pack to 565 and choose bytes based on LV_COLOR_16_SWAP.
-    lv_color_t c = lv_color_make(r, g, b);
-    uint8_t R = LV_COLOR_GET_R(c);
-    uint8_t G = LV_COLOR_GET_G(c);
-    uint8_t B = LV_COLOR_GET_B(c);
-
-    uint16_t r5 = (R >> 3) & 0x1F;
-    uint16_t g6 = (G >> 2) & 0x3F;
-    uint16_t b5 = (B >> 3) & 0x1F;
+    // Pack to RGB565 and store as little-endian bytes
+    uint16_t r5 = (r >> 3) & 0x1F;
+    uint16_t g6 = (g >> 2) & 0x3F;
+    uint16_t b5 = (b >> 3) & 0x1F;
     uint16_t rgb565 = (uint16_t) ((r5 << 11) | (g6 << 5) | b5);
 
-#if LV_COLOR_16_SWAP
-    // LVGL stores high byte first in memory when swap=1
-    pal16_byte0_[i] = (uint8_t) (rgb565 >> 8);
-    pal16_byte1_[i] = (uint8_t) (rgb565 & 0xFF);
-#else
-    // Standard little-endian memory order
+    // Standard little-endian memory order (LV_COLOR_16_SWAP removed in LVGL 9)
     pal16_byte0_[i] = (uint8_t) (rgb565 & 0xFF);
     pal16_byte1_[i] = (uint8_t) (rgb565 >> 8);
-#endif
 
 #elif LV_COLOR_DEPTH == 24
     pal_rgb_[i][0] = r;
@@ -100,36 +88,37 @@ void FxAurora::build_noise_lut_() {
 
 void FxAurora::on_bind(lv_obj_t *canvas) {
   FxBase::on_bind(canvas);
-  const lv_img_dsc_t *img = (const lv_img_dsc_t *) lv_canvas_get_img(canvas_);
+  lv_draw_buf_t *draw_buf = lv_canvas_get_draw_buf(canvas_);
+  if (!draw_buf || !draw_buf->data) {
+    ESP_LOGW(TAG, "Canvas draw buffer not ready");
+    return;
+  }
 
-  switch (img->header.cf) {
-    case LV_IMG_CF_TRUE_COLOR:
-    case LV_IMG_CF_TRUE_COLOR_CHROMA_KEYED:
-#if LV_COLOR_DEPTH == 16
+  lv_color_format_t cf = (lv_color_format_t) draw_buf->header.cf;
+  switch (cf) {
+    case LV_COLOR_FORMAT_RGB565:
       bpp_ = 2;
-#elif LV_COLOR_DEPTH == 24
-      bpp_ = 3;
-#elif LV_COLOR_DEPTH == 32
-      bpp_ = 4;
-#endif
       has_alpha_ = false;
       break;
-    case LV_IMG_CF_TRUE_COLOR_ALPHA:
-#if LV_COLOR_DEPTH == 16
-      bpp_ = 3;  // 2 bytes color + 1 byte alpha
-#elif LV_COLOR_DEPTH == 24
+    case LV_COLOR_FORMAT_RGB888:
+      bpp_ = 3;
+      has_alpha_ = false;
+      break;
+    case LV_COLOR_FORMAT_XRGB8888:
       bpp_ = 4;
-#elif LV_COLOR_DEPTH == 32
+      has_alpha_ = false;
+      break;
+    case LV_COLOR_FORMAT_ARGB8888:
       bpp_ = 4;
-#endif
       has_alpha_ = true;
       break;
     default:
-      ESP_LOGW(TAG, "Unsupported canvas format: %d", (int) img->header.cf);
+      ESP_LOGW(TAG, "Unsupported canvas format: %d", (int) cf);
       return;
   }
 
-  ESP_LOGD(TAG, "canvas cf=%d bpp=%d alpha=%d", (int) img->header.cf, bpp_, has_alpha_);
+  stride_ = (int) draw_buf->header.stride;
+  ESP_LOGD(TAG, "canvas cf=%d bpp=%d stride=%d alpha=%d", (int) cf, bpp_, stride_, has_alpha_);
 
   build_sin_lut_();
   build_palette_();
@@ -236,12 +225,12 @@ void FxAurora::step(float dt) {
   const int ww = (area_.w > 0) ? area_.w : cw;
   const int hh = (area_.h > 0) ? area_.h : ch;
 
-  const lv_img_dsc_t *img = (const lv_img_dsc_t *) lv_canvas_get_img(canvas_);
-  if (!img || !img->data)
+  lv_draw_buf_t *draw_buf = lv_canvas_get_draw_buf(canvas_);
+  if (!draw_buf || !draw_buf->data)
     return;
-  uint8_t *buf = const_cast<uint8_t *>(static_cast<const uint8_t *>(img->data));
+  uint8_t *buf = draw_buf->data;
 
-  const int stride = cw * bpp_;
+  const int stride = (int) draw_buf->header.stride;
 
   if (x0 + ww > cw || y0 + hh > ch) {
     ESP_LOGW(TAG, "Render area exceeds canvas bounds");
@@ -319,7 +308,7 @@ void FxAurora::step(float dt) {
 
   // Invalidate the updated region
   lv_area_t a;
-  lv_area_set(&a, (lv_coord_t) x0, (lv_coord_t) y0, (lv_coord_t) (x0 + ww - 1), (lv_coord_t) (y0 + hh - 1));
+  lv_area_set(&a, (int32_t) x0, (int32_t) y0, (int32_t) (x0 + ww - 1), (int32_t) (y0 + hh - 1));
   lv_obj_invalidate_area(canvas_, &a);
 }
 

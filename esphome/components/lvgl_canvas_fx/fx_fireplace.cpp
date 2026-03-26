@@ -22,6 +22,14 @@ void FxFireplace::on_resize(const Rect &r) {
     heat_.clear();
     return;
   }
+
+  // Cache stride from draw buffer
+  if (canvas_) {
+    lv_draw_buf_t *draw_buf = lv_canvas_get_draw_buf(canvas_);
+    if (draw_buf)
+      stride_ = (int) draw_buf->header.stride;
+  }
+
   heat_.assign(static_cast<size_t>(W_) * static_cast<size_t>(H_), 0);
   build_palette_();
 }
@@ -50,7 +58,17 @@ void FxFireplace::build_palette_() {
     uint8_t r = lerp8(K[si][0], K[si + 1][0], tt);
     uint8_t g = lerp8(K[si][1], K[si + 1][1], tt);
     uint8_t b = lerp8(K[si][2], K[si + 1][2], tt);
-    palette_[i] = lv_color_make(r, g, b);
+
+    // Store in the canvas buffer's native pixel format
+#if LV_COLOR_DEPTH == 16
+    palette_[i] = ((uint16_t) (r >> 3) << 11) | ((uint16_t) (g >> 2) << 5) | (b >> 3);
+#elif LV_COLOR_DEPTH == 32
+    palette_[i] = (0xFFu << 24) | ((uint32_t) r << 16) | ((uint32_t) g << 8) | b;
+#else
+    palette_[i][0] = r;
+    palette_[i][1] = g;
+    palette_[i][2] = b;
+#endif
   }
 }
 
@@ -122,13 +140,17 @@ void FxFireplace::draw_frame_() {
     return;
 
   // Access canvas buffer
-  const lv_img_dsc_t *img = (const lv_img_dsc_t *) lv_canvas_get_img(canvas_);
-  if (!img || !img->data)
+  lv_draw_buf_t *draw_buf = lv_canvas_get_draw_buf(canvas_);
+  if (!draw_buf || !draw_buf->data)
     return;
-  auto *buf = (lv_color_t *) img->data;
+  uint8_t *raw = draw_buf->data;
+  const int stride = (int) draw_buf->header.stride;
+
+  constexpr int BPP = LV_COLOR_DEPTH / 8;
 
   // Map each heat cell (0..36) to a palette color
   for (int y = 0; y < H_; ++y) {
+    uint8_t *row = raw + (area_.y + y) * stride + area_.x * BPP;
     int iy = y * W_;
     for (int x = 0; x < W_; ++x) {
       int idx = (int) heat_[iy + x];
@@ -136,7 +158,17 @@ void FxFireplace::draw_frame_() {
         idx = 0;
       if (idx > 36)
         idx = 36;
-      buf[iy + x] = palette_[idx];
+
+#if LV_COLOR_DEPTH == 16
+      reinterpret_cast<uint16_t *>(row)[x] = palette_[idx];
+#elif LV_COLOR_DEPTH == 32
+      reinterpret_cast<uint32_t *>(row)[x] = palette_[idx];
+#else
+      uint8_t *p = row + x * 3;
+      p[0] = palette_[idx][0];
+      p[1] = palette_[idx][1];
+      p[2] = palette_[idx][2];
+#endif
     }
   }
 
@@ -149,11 +181,23 @@ void FxFireplace::draw_frame_() {
   for (int yb = H_ - log_h; yb < H_; ++yb) {
     if (yb < 0)
       continue;
-    int iyb = yb * W_;
+    uint8_t *row = raw + (area_.y + yb) * stride + area_.x * BPP;
     for (int x = 0; x < W_; ++x) {
       uint8_t d = ((x ^ yb) & 3) ? 10 : 0;
       uint8_t r = 78 + d, g = 40 + (d >> 1), b = 10;
-      buf[iyb + x] = lv_color_make(r, g, b);
+
+#if LV_COLOR_DEPTH == 16
+      reinterpret_cast<uint16_t *>(row)[x] =
+          ((uint16_t) (r >> 3) << 11) | ((uint16_t) (g >> 2) << 5) | (b >> 3);
+#elif LV_COLOR_DEPTH == 32
+      reinterpret_cast<uint32_t *>(row)[x] =
+          (0xFFu << 24) | ((uint32_t) r << 16) | ((uint32_t) g << 8) | b;
+#else
+      uint8_t *p = row + x * 3;
+      p[0] = r;
+      p[1] = g;
+      p[2] = b;
+#endif
     }
   }
 
