@@ -32,32 +32,25 @@ void FxAurora::build_sin_lut_() {
 }
 
 void FxAurora::build_palette_() {
-  // 256-step gradient: teal -> blue -> purple
+  // 256-step gradient: teal -> blue -> purple. Dim intentionally for a "moody"
+  // aurora look — a vivid full-range gradient washes out the effect.
   for (int i = 0; i < 256; ++i) {
     float t = i / 255.0f;
     uint8_t r, g, b;
     if (t < 0.5f) {
       float u = t * 2.0f;
-      r = (uint8_t) (0.0f + u * 40.0f);
-      g = (uint8_t) (200.0f - u * 110.0f);
-      b = (uint8_t) (160.0f + u * 95.0f);
+      r = (uint8_t) (0.0f + u * 5.0f);
+      g = (uint8_t) (25.0f - u * 14.0f);
+      b = (uint8_t) (20.0f + u * 12.0f);
     } else {
       float u = (t - 0.5f) * 2.0f;
-      r = (uint8_t) (40.0f + u * 140.0f);
-      g = (uint8_t) (90.0f - u * 30.0f);
-      b = (uint8_t) (255.0f - u * 55.0f);
+      r = (uint8_t) (5.0f + u * 17.0f);
+      g = (uint8_t) (11.0f - u * 4.0f);
+      b = (uint8_t) (32.0f - u * 7.0f);
     }
 
 #if LV_COLOR_DEPTH == 16
-    // Pack to RGB565 and store as little-endian bytes
-    uint16_t r5 = (r >> 3) & 0x1F;
-    uint16_t g6 = (g >> 2) & 0x3F;
-    uint16_t b5 = (b >> 3) & 0x1F;
-    uint16_t rgb565 = (uint16_t) ((r5 << 11) | (g6 << 5) | b5);
-
-    // Standard little-endian memory order (LV_COLOR_16_SWAP removed in LVGL 9)
-    pal16_byte0_[i] = (uint8_t) (rgb565 & 0xFF);
-    pal16_byte1_[i] = (uint8_t) (rgb565 >> 8);
+    pal16_[i] = ((uint16_t) (r >> 3) << 11) | ((uint16_t) (g >> 2) << 5) | (b >> 3);
 
 #elif LV_COLOR_DEPTH == 24
     pal_rgb_[i][0] = r;
@@ -165,7 +158,7 @@ inline uint8_t FxAurora::value_noise8_fast_(int u_q8_8, int v_q8_8, uint8_t scal
 }
 
 #if LV_COLOR_DEPTH == 16
-// Batch process 4 pixels using ESP-DSP (write BYTES)
+// Batch process 4 pixels using ESP-DSP
 inline void FxAurora::process_4_pixels_dsp_(uint8_t *out, int xx, int syb, int v, uint8_t ang_t1, int u_scale,
                                             int intensity_scaled) {
   float values[4];
@@ -182,18 +175,18 @@ inline void FxAurora::process_4_pixels_dsp_(uint8_t *out, int xx, int syb, int v
 
   dsps_mulc_f32_ansi(values, values, 4, 1.0f, 1, 1);
 
+  uint16_t *p16 = reinterpret_cast<uint16_t *>(out);
   for (int i = 0; i < 4; ++i) {
     int val = (int) values[i];
     uint8_t idx = (uint8_t) ((val + pal_shift_) & 0xFF);
-    uint8_t *p = out + (i * 2);
-    p[0] = pal16_byte0_[idx];
-    p[1] = pal16_byte1_[idx];
+    p16[i] = pal16_[idx];
   }
 }
 
-// Process 2 pixels (write BYTES)
+// Process 2 pixels
 inline void FxAurora::process_2_pixels_fast_(uint8_t *out, int xx, int syb, int v, uint8_t ang_t1, int u_scale,
                                              int intensity_scaled) {
+  uint16_t *p16 = reinterpret_cast<uint16_t *>(out);
   for (int i = 0; i < 2; ++i) {
     uint8_t ax = (uint8_t) (((xx + i) * 5 + ang_t1) & 0xFF);
     int16_t sx = sin_q15_[ax];
@@ -202,9 +195,7 @@ inline void FxAurora::process_2_pixels_fast_(uint8_t *out, int xx, int syb, int 
     uint8_t n = value_noise8_fast_(u, v, scale_);
     int val = ((sxb * 3) + (syb * 2) + (n * 3)) * intensity_scaled >> 8;
     uint8_t idx = (uint8_t) ((val + pal_shift_) & 0xFF);
-    uint8_t *p = out + (i * 2);
-    p[0] = pal16_byte0_[idx];
-    p[1] = pal16_byte1_[idx];
+    p16[i] = pal16_[idx];
   }
 }
 #endif
@@ -260,7 +251,7 @@ void FxAurora::step(float dt) {
 
 #if LV_COLOR_DEPTH == 16
     if (!has_alpha_) {
-      uint8_t *row_bytes = row;  // 2 bytes per pixel, write explicitly
+      uint8_t *row_bytes = row;
       for (; xx <= ww - 4; xx += 4) {
         process_4_pixels_dsp_(row_bytes + (xx * 2), xx, syb, v, ang_t1, u_scale, intensity_scaled);
       }
@@ -283,12 +274,8 @@ void FxAurora::step(float dt) {
       uint8_t *pixel_ptr = row + xx * bpp_;
 
 #if LV_COLOR_DEPTH == 16
-      if (!has_alpha_) {
-        pixel_ptr[0] = pal16_byte0_[idx];
-        pixel_ptr[1] = pal16_byte1_[idx];
-      } else {
-        pixel_ptr[0] = pal16_byte0_[idx];
-        pixel_ptr[1] = pal16_byte1_[idx];
+      *reinterpret_cast<uint16_t *>(pixel_ptr) = pal16_[idx];
+      if (has_alpha_) {
         pixel_ptr[2] = 0xFF;
       }
 

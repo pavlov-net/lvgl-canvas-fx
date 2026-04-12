@@ -46,21 +46,21 @@ ITEM_SCHEMA = cv.Schema({
 
 CONFIG_SCHEMA = cv.All(cv.ensure_list(ITEM_SCHEMA))
 
-@automation.register_action("lvgl_canvas_fx.pause", PauseAction, cv.Schema({ cv.Required(CONF_ID): cv.use_id(LvglCanvasFx) }))
+@automation.register_action("lvgl_canvas_fx.pause", PauseAction, cv.Schema({ cv.Required(CONF_ID): cv.use_id(LvglCanvasFx) }), synchronous=True)
 async def pause_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id)
     tgt = await cg.get_variable(config[CONF_ID])
     cg.add(var.set_target(tgt))
     return var
 
-@automation.register_action("lvgl_canvas_fx.resume", ResumeAction, cv.Schema({ cv.Required(CONF_ID): cv.use_id(LvglCanvasFx) }))
+@automation.register_action("lvgl_canvas_fx.resume", ResumeAction, cv.Schema({ cv.Required(CONF_ID): cv.use_id(LvglCanvasFx) }), synchronous=True)
 async def resume_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id)
     tgt = await cg.get_variable(config[CONF_ID])
     cg.add(var.set_target(tgt))
     return var
 
-@automation.register_action("lvgl_canvas_fx.toggle", ToggleAction, cv.Schema({ cv.Required(CONF_ID): cv.use_id(LvglCanvasFx) }))
+@automation.register_action("lvgl_canvas_fx.toggle", ToggleAction, cv.Schema({ cv.Required(CONF_ID): cv.use_id(LvglCanvasFx) }), synchronous=True)
 async def toggle_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id)
     tgt = await cg.get_variable(config[CONF_ID])
@@ -70,7 +70,7 @@ async def toggle_to_code(config, action_id, template_arg, args):
 @automation.register_action("lvgl_canvas_fx.set_fps", SetFpsAction, cv.Schema({
     cv.Required(CONF_ID): cv.use_id(LvglCanvasFx),
     cv.Required(CONF_FPS): cv.float_range(min=1.0, max=240.0),
-}))
+}), synchronous=True)
 async def setfps_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id)
     tgt = await cg.get_variable(config[CONF_ID])
@@ -81,7 +81,7 @@ async def setfps_to_code(config, action_id, template_arg, args):
 @automation.register_action("lvgl_canvas_fx.set_effect", SetEffectAction, cv.Schema({
     cv.Required(CONF_ID): cv.use_id(LvglCanvasFx),
     cv.Required(CONF_EFFECT): cv.templatable(cv.string),
-}))
+}), synchronous=True)
 async def seteffect_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     tgt = await cg.get_variable(config[CONF_ID])

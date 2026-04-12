@@ -5,6 +5,7 @@
 #include "fx_registry.h"
 #include <math.h>
 #include <algorithm>
+#include <cstring>
 
 extern "C" {
 #include <lvgl.h>

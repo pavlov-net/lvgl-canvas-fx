@@ -7,6 +7,7 @@ extern "C" {
 }
 #include "esp_random.h"
 #include <cmath>
+#include <cstring>
 
 namespace esphome {
 namespace lvgl_canvas_fx {
