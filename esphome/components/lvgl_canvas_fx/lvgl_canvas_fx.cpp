@@ -129,9 +129,9 @@ bool LvglCanvasFx::ensure_bound_() {
   if (!canvas_ || !lv_obj_is_valid(canvas_))
     return false;
 
-  const lv_img_dsc_t *img = (const lv_img_dsc_t *) lv_canvas_get_img(canvas_);
-  if (!img || !img->data) {
-    ESP_LOGW("lvgl_canvas_fx", "Canvas image not ready yet; will retry");
+  lv_draw_buf_t *draw_buf = lv_canvas_get_draw_buf(canvas_);
+  if (!draw_buf || !draw_buf->data) {
+    ESP_LOGW("lvgl_canvas_fx", "Canvas draw buffer not ready yet; will retry");
     return false;
   }
 

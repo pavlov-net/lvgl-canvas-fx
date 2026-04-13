@@ -52,6 +52,7 @@ class FxAurora : public FxBase {
 
   // ---- Format info (cached at bind) ----
   int bpp_{0};
+  int stride_{0};  // canvas row stride in bytes
   bool has_alpha_{false};
 
   // ---- LUTs (built at bind) ----
@@ -61,8 +62,7 @@ class FxAurora : public FxBase {
 
 // Platform-specific pre-computed palettes
 #if LV_COLOR_DEPTH == 16
-  uint8_t pal16_byte0_[256]{};
-  uint8_t pal16_byte1_[256]{};
+  uint16_t pal16_[256]{};  // Pre-packed RGB565, one 16-bit store per pixel
 #elif LV_COLOR_DEPTH == 24
   uint8_t pal_rgb_[256][3]{};  // Pre-packed RGB888
 #elif LV_COLOR_DEPTH == 32

@@ -32,44 +32,25 @@ void FxAurora::build_sin_lut_() {
 }
 
 void FxAurora::build_palette_() {
-  // 256-step gradient: teal -> blue -> purple
+  // 256-step gradient: teal -> blue -> purple. Dim intentionally for a "moody"
+  // aurora look — a vivid full-range gradient washes out the effect.
   for (int i = 0; i < 256; ++i) {
     float t = i / 255.0f;
     uint8_t r, g, b;
     if (t < 0.5f) {
       float u = t * 2.0f;
-      r = (uint8_t) (0.0f + u * 40.0f);
-      g = (uint8_t) (200.0f - u * 110.0f);
-      b = (uint8_t) (160.0f + u * 95.0f);
+      r = (uint8_t) (0.0f + u * 5.0f);
+      g = (uint8_t) (25.0f - u * 14.0f);
+      b = (uint8_t) (20.0f + u * 12.0f);
     } else {
       float u = (t - 0.5f) * 2.0f;
-      r = (uint8_t) (40.0f + u * 140.0f);
-      g = (uint8_t) (90.0f - u * 30.0f);
-      b = (uint8_t) (255.0f - u * 55.0f);
+      r = (uint8_t) (5.0f + u * 17.0f);
+      g = (uint8_t) (11.0f - u * 4.0f);
+      b = (uint8_t) (32.0f - u * 7.0f);
     }
 
 #if LV_COLOR_DEPTH == 16
-    // Use LVGL's channel macros to derive RGB,
-    // then pack to 565 and choose bytes based on LV_COLOR_16_SWAP.
-    lv_color_t c = lv_color_make(r, g, b);
-    uint8_t R = LV_COLOR_GET_R(c);
-    uint8_t G = LV_COLOR_GET_G(c);
-    uint8_t B = LV_COLOR_GET_B(c);
-
-    uint16_t r5 = (R >> 3) & 0x1F;
-    uint16_t g6 = (G >> 2) & 0x3F;
-    uint16_t b5 = (B >> 3) & 0x1F;
-    uint16_t rgb565 = (uint16_t) ((r5 << 11) | (g6 << 5) | b5);
-
-#if LV_COLOR_16_SWAP
-    // LVGL stores high byte first in memory when swap=1
-    pal16_byte0_[i] = (uint8_t) (rgb565 >> 8);
-    pal16_byte1_[i] = (uint8_t) (rgb565 & 0xFF);
-#else
-    // Standard little-endian memory order
-    pal16_byte0_[i] = (uint8_t) (rgb565 & 0xFF);
-    pal16_byte1_[i] = (uint8_t) (rgb565 >> 8);
-#endif
+    pal16_[i] = ((uint16_t) (r >> 3) << 11) | ((uint16_t) (g >> 2) << 5) | (b >> 3);
 
 #elif LV_COLOR_DEPTH == 24
     pal_rgb_[i][0] = r;
@@ -100,36 +81,37 @@ void FxAurora::build_noise_lut_() {
 
 void FxAurora::on_bind(lv_obj_t *canvas) {
   FxBase::on_bind(canvas);
-  const lv_img_dsc_t *img = (const lv_img_dsc_t *) lv_canvas_get_img(canvas_);
+  lv_draw_buf_t *draw_buf = lv_canvas_get_draw_buf(canvas_);
+  if (!draw_buf || !draw_buf->data) {
+    ESP_LOGW(TAG, "Canvas draw buffer not ready");
+    return;
+  }
 
-  switch (img->header.cf) {
-    case LV_IMG_CF_TRUE_COLOR:
-    case LV_IMG_CF_TRUE_COLOR_CHROMA_KEYED:
-#if LV_COLOR_DEPTH == 16
+  lv_color_format_t cf = (lv_color_format_t) draw_buf->header.cf;
+  switch (cf) {
+    case LV_COLOR_FORMAT_RGB565:
       bpp_ = 2;
-#elif LV_COLOR_DEPTH == 24
-      bpp_ = 3;
-#elif LV_COLOR_DEPTH == 32
-      bpp_ = 4;
-#endif
       has_alpha_ = false;
       break;
-    case LV_IMG_CF_TRUE_COLOR_ALPHA:
-#if LV_COLOR_DEPTH == 16
-      bpp_ = 3;  // 2 bytes color + 1 byte alpha
-#elif LV_COLOR_DEPTH == 24
+    case LV_COLOR_FORMAT_RGB888:
+      bpp_ = 3;
+      has_alpha_ = false;
+      break;
+    case LV_COLOR_FORMAT_XRGB8888:
       bpp_ = 4;
-#elif LV_COLOR_DEPTH == 32
+      has_alpha_ = false;
+      break;
+    case LV_COLOR_FORMAT_ARGB8888:
       bpp_ = 4;
-#endif
       has_alpha_ = true;
       break;
     default:
-      ESP_LOGW(TAG, "Unsupported canvas format: %d", (int) img->header.cf);
+      ESP_LOGW(TAG, "Unsupported canvas format: %d", (int) cf);
       return;
   }
 
-  ESP_LOGD(TAG, "canvas cf=%d bpp=%d alpha=%d", (int) img->header.cf, bpp_, has_alpha_);
+  stride_ = (int) draw_buf->header.stride;
+  ESP_LOGD(TAG, "canvas cf=%d bpp=%d stride=%d alpha=%d", (int) cf, bpp_, stride_, has_alpha_);
 
   build_sin_lut_();
   build_palette_();
@@ -176,7 +158,7 @@ inline uint8_t FxAurora::value_noise8_fast_(int u_q8_8, int v_q8_8, uint8_t scal
 }
 
 #if LV_COLOR_DEPTH == 16
-// Batch process 4 pixels using ESP-DSP (write BYTES)
+// Batch process 4 pixels using ESP-DSP
 inline void FxAurora::process_4_pixels_dsp_(uint8_t *out, int xx, int syb, int v, uint8_t ang_t1, int u_scale,
                                             int intensity_scaled) {
   float values[4];
@@ -193,18 +175,18 @@ inline void FxAurora::process_4_pixels_dsp_(uint8_t *out, int xx, int syb, int v
 
   dsps_mulc_f32_ansi(values, values, 4, 1.0f, 1, 1);
 
+  uint16_t *p16 = reinterpret_cast<uint16_t *>(out);
   for (int i = 0; i < 4; ++i) {
     int val = (int) values[i];
     uint8_t idx = (uint8_t) ((val + pal_shift_) & 0xFF);
-    uint8_t *p = out + (i * 2);
-    p[0] = pal16_byte0_[idx];
-    p[1] = pal16_byte1_[idx];
+    p16[i] = pal16_[idx];
   }
 }
 
-// Process 2 pixels (write BYTES)
+// Process 2 pixels
 inline void FxAurora::process_2_pixels_fast_(uint8_t *out, int xx, int syb, int v, uint8_t ang_t1, int u_scale,
                                              int intensity_scaled) {
+  uint16_t *p16 = reinterpret_cast<uint16_t *>(out);
   for (int i = 0; i < 2; ++i) {
     uint8_t ax = (uint8_t) (((xx + i) * 5 + ang_t1) & 0xFF);
     int16_t sx = sin_q15_[ax];
@@ -213,9 +195,7 @@ inline void FxAurora::process_2_pixels_fast_(uint8_t *out, int xx, int syb, int 
     uint8_t n = value_noise8_fast_(u, v, scale_);
     int val = ((sxb * 3) + (syb * 2) + (n * 3)) * intensity_scaled >> 8;
     uint8_t idx = (uint8_t) ((val + pal_shift_) & 0xFF);
-    uint8_t *p = out + (i * 2);
-    p[0] = pal16_byte0_[idx];
-    p[1] = pal16_byte1_[idx];
+    p16[i] = pal16_[idx];
   }
 }
 #endif
@@ -236,12 +216,12 @@ void FxAurora::step(float dt) {
   const int ww = (area_.w > 0) ? area_.w : cw;
   const int hh = (area_.h > 0) ? area_.h : ch;
 
-  const lv_img_dsc_t *img = (const lv_img_dsc_t *) lv_canvas_get_img(canvas_);
-  if (!img || !img->data)
+  lv_draw_buf_t *draw_buf = lv_canvas_get_draw_buf(canvas_);
+  if (!draw_buf || !draw_buf->data)
     return;
-  uint8_t *buf = const_cast<uint8_t *>(static_cast<const uint8_t *>(img->data));
+  uint8_t *buf = draw_buf->data;
 
-  const int stride = cw * bpp_;
+  const int stride = (int) draw_buf->header.stride;
 
   if (x0 + ww > cw || y0 + hh > ch) {
     ESP_LOGW(TAG, "Render area exceeds canvas bounds");
@@ -271,7 +251,7 @@ void FxAurora::step(float dt) {
 
 #if LV_COLOR_DEPTH == 16
     if (!has_alpha_) {
-      uint8_t *row_bytes = row;  // 2 bytes per pixel, write explicitly
+      uint8_t *row_bytes = row;
       for (; xx <= ww - 4; xx += 4) {
         process_4_pixels_dsp_(row_bytes + (xx * 2), xx, syb, v, ang_t1, u_scale, intensity_scaled);
       }
@@ -294,12 +274,8 @@ void FxAurora::step(float dt) {
       uint8_t *pixel_ptr = row + xx * bpp_;
 
 #if LV_COLOR_DEPTH == 16
-      if (!has_alpha_) {
-        pixel_ptr[0] = pal16_byte0_[idx];
-        pixel_ptr[1] = pal16_byte1_[idx];
-      } else {
-        pixel_ptr[0] = pal16_byte0_[idx];
-        pixel_ptr[1] = pal16_byte1_[idx];
+      *reinterpret_cast<uint16_t *>(pixel_ptr) = pal16_[idx];
+      if (has_alpha_) {
         pixel_ptr[2] = 0xFF;
       }
 
@@ -319,7 +295,7 @@ void FxAurora::step(float dt) {
 
   // Invalidate the updated region
   lv_area_t a;
-  lv_area_set(&a, (lv_coord_t) x0, (lv_coord_t) y0, (lv_coord_t) (x0 + ww - 1), (lv_coord_t) (y0 + hh - 1));
+  lv_area_set(&a, (int32_t) x0, (int32_t) y0, (int32_t) (x0 + ww - 1), (int32_t) (y0 + hh - 1));
   lv_obj_invalidate_area(canvas_, &a);
 }
 
