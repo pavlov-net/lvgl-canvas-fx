@@ -115,4 +115,4 @@ async def to_code(config):
     cg.add_build_flag("-DCP_USE_DOUBLES=0")
     cg.add_build_flag("-DCP_BUFFER_BYTES=8192")             # default is larger; 8KB is fine for a tiny scene
     cg.add_build_flag("-DCP_MAX_ARBITERS_PER_SPACE=256")    # optional cap for tiny worlds
-    cg.add_library("https://github.com/stuartparmenter/chipmunk2d-platformio", None)
+    cg.add_library("Chipmunk2D", None, "https://github.com/stuartparmenter/chipmunk2d-platformio")
