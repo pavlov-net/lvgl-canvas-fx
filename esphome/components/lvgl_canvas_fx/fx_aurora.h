@@ -49,6 +49,7 @@ class FxAurora : public FxBase {
   uint8_t scale_{24};
   uint8_t intensity_{192};
   uint8_t pal_shift_{0};
+  float pal_shift_acc_{0.0f};
 
   // ---- Format info (cached at bind) ----
   int bpp_{0};
