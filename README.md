@@ -2,7 +2,7 @@
 
 An ESPHome external component that renders fun, high‑performance visual effects on an **LVGL Canvas**. It’s designed for ESP32‑class devices (ESPHome 2026.4.0+, LVGL 9.5) and works with any LVGL‑backed display (HUB75 matrices, TFTs, etc.).
 
-> **Status:** early but functional. Effects today: `circle`, `fireworks`, `fireplace`, `aurora`, `audio_spectrum`. Contributions welcome!
+> **Status:** early but functional. Effects today: `circle`, `fireworks`, `fireplace`, `aurora`, `audio_spectrum`, `plasma`, `breathing`, `clouds`, `sunset`, `starfield`, `snowfall`, `leaves`, `sakura`, `fireflies`, `warp`, `boids`, `ripples`, `matrix`, `sand`, `lightning`, `lava_lamp`, `rain`. Contributions welcome!
 
 ---
 
@@ -38,6 +38,24 @@ select:
       - circle
       - fireworks
       - fireplace
+      - aurora
+      - plasma
+      - breathing
+      - clouds
+      - sunset
+      - starfield
+      - snowfall
+      - leaves
+      - sakura
+      - fireflies
+      - warp
+      - boids
+      - ripples
+      - matrix
+      - sand
+      - lightning
+      - lava_lamp
+      - rain
     initial_option: fireworks
     set_action:
       - lvgl_canvas_fx.set_effect:
@@ -98,14 +116,65 @@ Under the `lvgl_canvas_fx:` array you can configure:
 |-----------------|----------|----------|------|
 | `id`            | ID       | —        | Required. Instance id.
 | `canvas`        | string   | —        | Required. The LVGL Canvas widget id to render into.
-| `effect`        | string   | `circle` | One of: `circle`, `fireworks`, `fireplace`.
+| `effect`        | string   | `circle` | Any effect key from the table below.
 | `fps`           | int      | `30`     | Target frame rate. Lower to save CPU.
 | `start_paused`  | bool     | `false`  | Start paused and `resume` when visible.
+
+### Effects
+| Key | Description |
+|-----|-------------|
+| `circle` | Simple bouncing circle (demo/reference effect). |
+| `fireworks` | Physics-based fireworks (Chipmunk2D) with many burst shapes. |
+| `fireplace` | Classic heat-field fire with embers. |
+| `aurora` | Northern-lights color field. |
+| `audio_spectrum` | FFT spectrum bars; feed audio via `submit_data()`. |
+| `plasma` | Slow demoscene plasma through a muted cyan/violet palette. |
+| `breathing` | Soft radial glow pulsing on a calm ~6 s cycle — a breathing pace aid. |
+| `clouds` | Drifting fog banks, low-contrast gray-blue. |
+| `sunset` | Vertical sky gradient cycling night→dawn→day→dusk. HA-controllable (see below). |
+| `starfield` | Twinkling stars with an occasional shooting star. |
+| `snowfall` | Two-layer parallax snow with sine sway. |
+| `leaves` | Tumbling autumn leaves. |
+| `sakura` | Same engine as `leaves`, cherry-blossom palette. |
+| `fireflies` | Warm wandering dots, each breathing on its own rhythm. |
+| `warp` | Hyperspace starfield streaking out from center. |
+| `boids` | A tiny flock (murmuration) with faint trails. |
+| `ripples` | Expanding raindrop rings on still water. |
+| `matrix` | Ambient smoothed green digital rain — muted, no strobing. |
+| `sand` | Falling-sand toy with slowly shifting pastel grains. |
+| `lightning` | Dark storm sky with rare branching bolts and a decaying flash. |
+| `lava_lamp` | Metaball blobs drifting and merging. |
+| `rain` | Rain on glass: streaks plus clinging droplets that slide and merge. HA-controllable (see below). |
 
 ### Services (actions)
 - `lvgl_canvas_fx.set_effect: { id, effect }`
 - `lvgl_canvas_fx.pause: { id }`
 - `lvgl_canvas_fx.resume: { id }`
+- `lvgl_canvas_fx.toggle: { id }`
+- `lvgl_canvas_fx.set_fps: { id, fps }`
+
+### Effect parameters (`submit_data`)
+Some effects accept runtime data through the instance's `submit_data(const void*, size_t)` method (also how `audio_spectrum` receives audio). `rain` and `sunset` take a single **float 0..1**:
+
+- `rain` — intensity: `0.0` = no rain (screen drains to black), `1.0` = downpour. Perfect for mirroring real weather from Home Assistant.
+- `sunset` — sky phase: `0.0` = midnight, `0.25` = dawn, `0.5` = midday, `0.75` = dusk. Map your sun elevation or time of day; without data it free-runs a full cycle every ~4 minutes.
+
+```yaml
+number:
+  - platform: template
+    name: "Rain Intensity"
+    min_value: 0
+    max_value: 100
+    step: 5
+    optimistic: true
+    restore_value: true
+    set_action:
+      - lambda: |-
+          float v = x / 100.0f;
+          id(cfx)->submit_data(&v, sizeof(v));
+```
+
+Caveats: `submit_data` reaches only the *currently active* effect, so re-send the value after `set_effect` switches to it; values sent before the effect is bound are safely dropped.
 
 ## Tips & troubleshooting
 - **Page lifecycle:** Use `start_paused: true` and call `resume` on `on_load` and `pause` on `on_unload` to avoid burning cycles off‑screen.
