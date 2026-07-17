@@ -230,7 +230,11 @@ void FxAurora::step(float dt) {
 
   // Advance time & palette drift
   t_ += dt * speed_;
-  int pal_shift_delta = (int) (dt * 32.0f);
+  // Accumulate in float so the drift is frame-rate independent; at high fps
+  // dt * 32 is < 1 per frame and would truncate to 0, freezing the palette.
+  pal_shift_acc_ += dt * 32.0f;
+  int pal_shift_delta = (int) pal_shift_acc_;
+  pal_shift_acc_ -= (float) pal_shift_delta;
   pal_shift_ = (uint8_t) ((pal_shift_ + pal_shift_delta) & 0xFF);
 
   const uint8_t ang_t0 = (uint8_t) ((int) (t_ * 64.0f) & 0xFF);
