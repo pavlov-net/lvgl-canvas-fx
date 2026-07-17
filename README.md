@@ -116,8 +116,8 @@ Under the `lvgl_canvas_fx:` array you can configure:
 |-----------------|----------|----------|------|
 | `id`            | ID       | —        | Required. Instance id.
 | `canvas`        | string   | —        | Required. The LVGL Canvas widget id to render into.
-| `effect`        | string   | `circle` | Any effect key from the table below.
-| `fps`           | int      | `30`     | Target frame rate. Lower to save CPU.
+| `effect`        | string   | —        | Required. Any effect key from the table below.
+| `fps`           | float    | `30`     | Target frame rate (1 to 240). Lower to save CPU.
 | `start_paused`  | bool     | `false`  | Start paused and `resume` when visible.
 
 ### Effects
