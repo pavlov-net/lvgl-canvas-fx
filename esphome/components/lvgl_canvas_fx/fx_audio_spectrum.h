@@ -8,6 +8,7 @@ extern "C" {
 #include <lvgl.h>
 }
 
+#include <atomic>
 #include <vector>
 #include <algorithm>
 #include <math.h>
@@ -49,7 +50,9 @@ class FxAudioSpectrum : public FxBase {
 
   // ---- Config (same semantics as page_eq.h) ----
   int fft_n_ = 512;
-  int num_bars_ = 16;
+  // Written on the main thread (ensure_bar_geom_), read on the mic thread
+  // (on_data) as a loop bound; atomic to avoid a torn cross-thread read.
+  std::atomic<int> num_bars_{16};
   float fs_ = 16000.0f;
   float peak_decay_ = 0.02f;
   float smooth_ = 0.25f;

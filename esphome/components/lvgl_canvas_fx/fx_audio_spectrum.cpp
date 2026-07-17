@@ -61,22 +61,24 @@ void FxAudioSpectrum::ensure_bar_geom_() {
   usable_w_ = area_.w;
   int gap = std::max(0, gap_px_);
 
+  int bars = num_bars_.load();
   // If you want dynamic bars from width, enable this block:
   if (round_to_mult8_) {
     int candidate = (usable_w_ + gap) / (7 + gap);  // assume ~7px bar as baseline
     candidate = std::max(8, std::min(96, candidate));
     candidate = (candidate + 7) & ~7;
-    if (candidate != num_bars_) {
-      num_bars_ = candidate;
-      // resize bar vectors but keep FFT params
-      bar_.assign(num_bars_, 0.0f);
-      peak_.assign(num_bars_, 0.0f);
-      bar_copy_.assign(num_bars_, 0.0f);
-      peak_copy_.assign(num_bars_, 0.0f);
+    if (candidate != bars) {
+      bars = candidate;
+      // Publish the new bar count only. The producer (on_data, mic thread)
+      // owns bar_/peak_ and resizes them to match on its next call; the
+      // snapshot copies are resized under the mutex when it publishes. The
+      // main thread must not reallocate those buffers while on_data may be
+      // writing them.
+      num_bars_.store(bars);
     }
   }
 
-  bar_w_px_ = (usable_w_ - gap * (num_bars_ - 1)) / std::max(1, num_bars_);
+  bar_w_px_ = (usable_w_ - gap * (bars - 1)) / std::max(1, bars);
   if (bar_w_px_ < 1)
     bar_w_px_ = 1;
 }
@@ -108,10 +110,11 @@ void FxAudioSpectrum::ensure_init_() {
 
   fft_in_.assign(fft_n_ * 2, 0.0f);
 
-  bar_.assign(num_bars_, 0.0f);
-  peak_.assign(num_bars_, 0.0f);
-  bar_copy_.assign(num_bars_, 0.0f);
-  peak_copy_.assign(num_bars_, 0.0f);
+  const int nbars = num_bars_.load();
+  bar_.assign(nbars, 0.0f);
+  peak_.assign(nbars, 0.0f);
+  bar_copy_.assign(nbars, 0.0f);
+  peak_copy_.assign(nbars, 0.0f);
 
   hp_prev_x_ = hp_prev_y_ = 0.0f;
 
@@ -148,6 +151,11 @@ void FxAudioSpectrum::on_data(const void *data, size_t bytes) {
   int nsamp = (int) (bytes / 4);
   if (nsamp <= 0)
     return;
+
+  // Snapshot the bar count once. The main thread can change it (via
+  // ensure_bar_geom_) between calls, so size and index bar_/peak_ against a
+  // single stable value for the whole call.
+  const int nbars = num_bars_.load();
 
   // Ensure ring buffer is sized before we append samples
   if ((int) ring_.size() != fft_n_) {
@@ -195,11 +203,12 @@ void FxAudioSpectrum::on_data(const void *data, size_t bytes) {
   dsps_bit_rev_fc32(fft_in_.data(), fft_n_);
   dsps_cplx2reC_fc32(fft_in_.data(), fft_n_);
 
-  // Bars
-  if ((int) bar_.size() != num_bars_)
-    bar_.assign(num_bars_, 0.0f);
-  if ((int) peak_.size() != num_bars_)
-    peak_.assign(num_bars_, 0.0f);
+  // Bars: the producer owns these buffers, so size them here to match the
+  // current bar count before writing.
+  if ((int) bar_.size() != nbars)
+    bar_.assign(nbars, 0.0f);
+  if ((int) peak_.size() != nbars)
+    peak_.assign(nbars, 0.0f);
 
   const int n_bins = fft_n_ / 2;
   const float fmax = std::min(7500.0f, fmax_frac_ * fs_);
@@ -215,14 +224,14 @@ void FxAudioSpectrum::on_data(const void *data, size_t bytes) {
 
   if (last_rms_db_ < noise_gate_db_) {
     // Silence gate: decay both bar + peak
-    for (int i = 0; i < num_bars_; i++) {
+    for (int i = 0; i < nbars; i++) {
       bar_[i] = std::max(0.0f, bar_[i] - idle_decay_);
       peak_[i] = std::max(0.0f, peak_[i] - idle_decay_);
     }
   } else {
-    for (int i = 0; i < num_bars_; i++) {
-      float t0 = (float) i / (float) num_bars_;
-      float t1 = (float) (i + 1) / (float) num_bars_;
+    for (int i = 0; i < nbars; i++) {
+      float t0 = (float) i / (float) nbars;
+      float t1 = (float) (i + 1) / (float) nbars;
       float f0 = fmin_ * powf(fmax / fmin_, t0);
       float f1 = fmin_ * powf(fmax / fmin_, t1);
 
@@ -276,6 +285,12 @@ void FxAudioSpectrum::step(float /*dt*/) {
   if (!dsc_init_)
     on_bind(canvas_);
 
+  // Settle bar geometry (and the bar count) from the current width first, so
+  // the count we draw against cannot change between the size check and the
+  // draw loop below.
+  ensure_bar_geom_();
+  const int nbars = num_bars_.load();
+
   // Take snapshot (if available)
   std::vector<float> bar_local, peak_local;
   bool ready = false;
@@ -287,11 +302,10 @@ void FxAudioSpectrum::step(float /*dt*/) {
     }
     xSemaphoreGive(data_mutex_);
   }
-  if (!ready || (int) bar_local.size() != num_bars_)
+  // Skip the frame until the producer has published a snapshot matching the
+  // current bar count, so bar_local/peak_local are never indexed out of range.
+  if (!ready || (int) bar_local.size() != nbars || (int) peak_local.size() != nbars)
     return;
-
-  // Ensure geometry is up to date with current width
-  ensure_bar_geom_();
 
   // Use LVGL 9 layer-based canvas drawing: batch all rects in one layer
   lv_layer_t layer;
@@ -312,7 +326,7 @@ void FxAudioSpectrum::step(float /*dt*/) {
   const int gap = gap_px_;
   int x = area_.x;
 
-  for (int i = 0; i < num_bars_; i++) {
+  for (int i = 0; i < nbars; i++) {
     int h = (int) lrintf(bar_local[i] * H);
     if (h < 1)
       h = 1;
