@@ -149,7 +149,14 @@ void FxAudioSpectrum::on_data(const void *data, size_t bytes) {
   if (nsamp <= 0)
     return;
 
-  // Accumulate RMS + max; convert 24-bit LJ to float; DC high-pass
+  // Ensure ring buffer is sized before we append samples
+  if ((int) ring_.size() != fft_n_) {
+    ring_.assign(fft_n_, 0.0f);
+    rpos_ = 0;
+  }
+
+  // Accumulate RMS + max; convert 24-bit LJ to float; DC high-pass;
+  // append each filtered sample to the ring buffer
   double acc2 = 0.0;
   float max_abs = 0.0f;
   for (int i = 0; i < nsamp; i++) {
@@ -163,24 +170,17 @@ void FxAudioSpectrum::on_data(const void *data, size_t bytes) {
     float a = fabsf(s);
     if (a > max_abs)
       max_abs = a;
+
+    ring_[rpos_] = y;
+    rpos_ = (rpos_ + 1) % fft_n_;
   }
   last_rms_ = sqrt(acc2 / (double) nsamp);
   last_rms_db_ = 20.0f * log10f(last_rms_ + 1e-12f);
   last_max_abs_ = max_abs;
 
-  // Ensure buffers sized
-  if ((int) ring_.size() != fft_n_) {
-    ring_.assign(fft_n_, 0.0f);
-    rpos_ = 0;
-  }
+  // Ensure FFT input is sized
   if ((int) fft_in_.size() != fft_n_ * 2)
     fft_in_.assign(fft_n_ * 2, 0.0f);
-
-  // Append recent time-domain samples (use latest HPF sample)
-  for (int i = 0; i < nsamp; i++) {
-    ring_[rpos_] = hp_prev_y_;
-    rpos_ = (rpos_ + 1) % fft_n_;
-  }
 
   // Copy most recent frame with Hann window; imag = 0
   for (int n = 0; n < fft_n_; n++) {
